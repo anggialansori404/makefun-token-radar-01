@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Radar — pre-token protocols ranked by implied value</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="mark" aria-hidden="true"><span></span><span></span><span></span></div>
+    <div>
+      <h1>TOKEN RADAR</h1>
+      <p class="tagline">Pre-token protocols, priced from the market's own multiples.</p>
+    </div>
+  </div>
+  <div class="topstats" id="topstats"></div>
+</header>
+<div class="layout">
+  <aside class="rail">
+    <nav class="views" id="views" aria-label="Views">
+      <button data-view="board" class="viewbtn">The board</button>
+      <button data-view="watchlist" class="viewbtn">Watchlist</button>
+      <button data-view="live" class="viewbtn">Live peers</button>
+      <button data-view="model" class="viewbtn">The model</button>
+    </nav>
+    <section class="filters" id="filters">
+      <h2>Filter the board</h2>
+      <label>Search
+        <input id="f-search" type="search" placeholder="Name or slug" autocomplete="off">
+      </label>
+      <label>Category
+        <select id="f-category"><option value="">All categories</option></select>
+      </label>
+      <label>Chain
+        <select id="f-chain"><option value="">All chains</option></select>
+      </label>
+      <label>Minimum TVL
+        <select id="f-tvl">
+          <option value="0">Any size</option>
+          <option value="10000000">$10M and up</option>
+          <option value="50000000">$50M and up</option>
+          <option value="250000000">$250M and up</option>
+          <option value="1000000000">$1B and up</option>
+        </select>
+      </label>
+      <label>Confidence
+        <select id="f-conf">
+          <option value="0">Any confidence</option>
+          <option value="45">Medium and up</option>
+          <option value="70">High only</option>
+        </select>
+      </label>
+      <p class="railnote" id="railnote"></p>
+    </section>
+    <section class="legend">
+      <h2>Reading the board</h2>
+      <p><strong>Implied value</strong> is what a token would be worth if the protocol's record stayed as it is: its TVL priced at the median mcap/TVL of its traded peers, adjusted for momentum, track record and chain breadth. It is this board's claim, not a prediction that a token will be issued.</p>
+      <p><strong>Band</strong> is the peer set's interquartile range through the same adjustments. <strong>Confidence</strong> scores the evidence behind the number. <strong>Readiness</strong> is a separate signal and never moves the value.</p>
+    </section>
+  </aside>
+  <main class="main" id="main" tabindex="-1"></main>
+</div>
+<aside class="drawer" id="drawer" hidden></aside>
+<script src="../data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
