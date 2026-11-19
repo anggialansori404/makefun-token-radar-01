@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Radar — pre-token protocols, priced by a fitted market model</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">TR</div>
+    <div>
+      <h1>Token Radar</h1>
+      <p class="tagline">Pre-token protocols, priced by a model fitted on the market's own record — not by hand-set multiples.</p>
+    </div>
+  </div>
+  <div class="topstats" id="topstats"></div>
+</header>
+
+<nav class="views" id="views">
+  <button data-view="board" class="view-btn active">Board</button>
+  <button data-view="watchlist" class="view-btn">Watchlist</button>
+  <button data-view="live" class="view-btn">Fit evidence</button>
+  <button data-view="model" class="view-btn">The model</button>
+</nav>
+
+<section class="controls" id="controls">
+  <input type="search" id="q" placeholder="Search name or slug...">
+  <select id="f-category"><option value="">All categories</option></select>
+  <select id="f-chain"><option value="">All chains</option></select>
+  <label class="check"><input type="checkbox" id="f-watch"> Watchlist only</label>
+  <span class="count" id="count"></span>
+</section>
+
+<main>
+  <section id="view-board">
+    <table class="board">
+      <thead><tr id="board-head"></tr></thead>
+      <tbody id="board-body"></tbody>
+    </table>
+    <p class="foot">An implied value is what a token would be worth if the protocol's record stayed as it is. The radar does not predict whether or when a token is issued, and it says a protocol <em>records</em> no token — DefiLlama's record is not proof that none exists. Bands are the fitted peer group's own residual interquartile range: wide where the market prices a group inconsistently.</p>
+  </section>
+
+  <section id="view-live" hidden>
+    <h2>The evidence the fit stands on</h2>
+    <p class="lede">These protocols already trade, so the market has priced them. The model was fitted on the 128 traded protocols with a recorded market cap; below, the largest of them with the value the fitted model would have given each — the reader can check the fit against the record directly.</p>
+    <table class="board">
+      <thead><tr><th>Protocol</th><th>Category</th><th class="num">TVL</th><th class="num">Recorded value</th><th class="num">Recorded multiple</th><th class="num">Fitted value</th><th class="num">Fitted / recorded</th></tr></thead>
+      <tbody id="live-body"></tbody>
+    </table>
+  </section>
+
+  <section id="view-model" hidden>
+    <h2>A fitted comps model (<span id="model-version"></span>)</h2>
+    <div id="model-body"></div>
+  </section>
+</main>
+
+<aside id="drawer" hidden>
+  <button id="drawer-close" aria-label="Close detail">x</button>
+  <div id="drawer-body"></div>
+</aside>
+<div id="scrim" hidden></div>
+
+<script src="../data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
