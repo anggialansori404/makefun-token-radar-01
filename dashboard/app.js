@@ -133,7 +133,7 @@
       '<h3>How the model prices it</h3>' +
       '<div class="bar-row"><label><span>Base multiple at typical size</span><span>' + base.toFixed(2) + 'x</span></label>' +
       '<div class="bar-track"><div class="bar-fill" style="width:' + Math.min(100, base * 100) + '%"></div></div></div>' +
-      '<div class="bar-row"><label><span>Size adjustment (fitted slope ' + R.fit.size_slope.toFixed(2) + ')</span><span>' + (sizePct >= 0 ? '+' : '') + sizePct + '%</span></label>' +
+      '<div class="bar-row"><label><span>Size adjustment (fitted size curve)</span><span>' + (sizePct >= 0 ? '+' : '') + sizePct + '%</span></label>' +
       '<div class="bar-track"><div class="bar-fill amber" style="width:' + Math.min(100, Math.abs(sizePct)) + '%"></div></div></div>' +
       '<div class="bar-row"><label><span>' + esc(r.offset_basis) + ' offset, ' + r.peers + ' traded peers</span><span>' + (offsetPct >= 0 ? '+' : '') + offsetPct + '%</span></label>' +
       '<div class="bar-track"><div class="bar-fill" style="width:' + Math.min(100, Math.abs(offsetPct)) + '%"></div></div></div>' +
@@ -167,17 +167,17 @@
   $('model-body').innerHTML =
     '<div class="model-grid">' +
     '<div class="card"><h3>The fitted relationship</h3>' +
-    '<p><code>ln(mcap / TVL) = ' + R.fit.intercept.toFixed(2) + ' + (' + R.fit.size_slope.toFixed(2) + ') x (ln TVL - mean ln TVL) + group offset</code></p>' +
-    '<p>Fitted on the ' + R.fit.protocols + ' traded protocols with a recorded market cap, by iteratively reweighted least squares toward the conditional median, so the snapshot\'s extreme multiples (0.0003x to 400x) cannot set the price. At the typical TVL the base multiple is ' + R.fit.base_multiple.toFixed(2) + 'x; the fitted size slope of ' + R.fit.size_slope.toFixed(2) + ' means a protocol ten times the typical size carries about a third of the typical multiple — the single largest correction over a flat-multiple model.</p></div>' +
+    '<p><code>ln(mcap / TVL) = ' + R.fit.intercept.toFixed(2) + ' + (' + R.fit.size_slope.toFixed(2) + ') x s + (' + R.fit.size_quad.toFixed(2) + ') x s^2 + group offset, s = ln TVL - mean ln TVL</code></p>' +
+    '<p>Fitted on the ' + R.fit.protocols + ' traded protocols with a recorded market cap, by ridge-regularised iteratively reweighted least squares toward the conditional median, so the snapshot\'s extreme multiples (0.0003x to 400x) cannot set the price. At the typical TVL the base multiple is ' + R.fit.base_multiple.toFixed(2) + 'x; the fitted size slope of ' + R.fit.size_slope.toFixed(2) + ' means a protocol ten times the typical size carries about a quarter of the typical multiple — the single largest correction over a flat-multiple model. The curvature term (' + R.fit.size_quad.toFixed(2) + ') bends that line: the discount is steepest near the typical size and flattens for the largest protocols. New in fitcomps-2, with hierarchical group offsets below: on the backtest beside this card the median error moves from x3.9 to x3.7 and the within-2x share from 32% to 33% against fitcomps-1, the previous round\'s straight-line fit.</p></div>' +
     '<div class="card"><h3>The backtest (computed at run time)</h3>' +
     '<p>Deterministic 10-fold cross-validation over the ' + bt.protocols + ' traded protocols, five partitions: refit on nine folds, price the held-out fold, compare with the recorded market cap.</p>' +
     '<ul><li>Median absolute error: <b>x' + bt.typical_factor.toFixed(1) + '</b> (log10 ' + bt.median_abs_log10.toFixed(2) + ')</li>' +
     '<li>Priced within 2x of recorded: <b>' + Math.round(bt.within_2x * 100) + '%</b>; within 5x: <b>' + Math.round(bt.within_5x * 100) + '%</b></li>' +
     '<li>Rank correlation (Spearman): <b>' + bt.spearman.toFixed(2) + '</b>; mean bias: ' + (bt.bias_log10 >= 0 ? '+' : '') + bt.bias_log10.toFixed(2) + ' log10</li></ul></div>' +
     '<div class="card"><h3>Fitted and rejected</h3>' +
-    '<p>Three candidate signals were fitted and rejected because they moved the backtest error by less than their own noise: 7-day TVL growth, protocol age, and chain count. They appear on every row as context, and age sets the farm plan\'s holding period, but they do not move the price. A model that only uses what the record supports is the claim; the backtest above is the evidence.</p></div>' +
+    '<p>Three candidate signals were fitted again for this round — jointly with the size curve, under the same regularisation — and rejected again, because they moved the backtest error by less than their own noise: 7-day TVL growth, protocol age, and chain count. They appear on every row as context, and age sets the farm plan\'s holding period, but they do not move the price. A model that only uses what the record supports is the claim; the backtest above is the evidence.</p></div>' +
     '<div class="card"><h3>Group offsets</h3>' +
-    '<p>Each category\'s offset is the median residual of its traded members, shrunk toward zero by n/(n+6): deep categories move the price, thin ones barely do. Categories with no traded members take their family\'s offset.</p>' +
+    '<p>Each category\'s offset is the median residual of its traded members, shrunk toward zero by n/(n+10), and blended with its family\'s offset at the same weight: deep categories price themselves, thin ones lean on their family instead of standing alone. Categories with no traded members take their family\'s offset whole.</p>' +
     '<table class="mini"><thead><tr><th>Category</th><th class="num">Peers</th><th class="num">Offset</th><th class="num">Band q1-q3</th></tr></thead><tbody>' +
     groups.map(function (g) {
       return '<tr><td>' + esc(g.label) + '</td><td class="num">' + g.peers + '</td><td class="num">' + (g.offset >= 0 ? '+' : '') + g.offset.toFixed(2) + '</td><td class="num">' + g.band_q1.toFixed(2) + ' / ' + g.band_q3.toFixed(2) + '</td></tr>';

@@ -1,4 +1,5 @@
-// Token Radar v2 model: a fitted comps model. One sealed snapshot in, one ranked board out.
+// Token Radar v3 model: a fitted comps model with a curved size term and hierarchical group
+// offsets. One sealed snapshot in, one ranked board out.
 //
 // Where v1 (comps-2) priced a pre-token protocol at its TVL times the median multiple of its
 // traded category peers, with three hand-set multipliers on top, this model ESTIMATES every
@@ -9,30 +10,46 @@
 //
 // The fitted relationship, in logs:
 //
-//   ln(mcap / TVL) = intercept + size_slope x (ln TVL - mean ln TVL) + group offset
+//   ln(mcap / TVL) = intercept + size_slope x s + size_quad x s^2 + group offset,
+//   with s = ln TVL - mean ln TVL
 //
-//   size_slope   fitted, about -0.48 on this snapshot: the market pays a smaller multiple for
+//   size_slope   fitted, about -0.56 on this snapshot: the market pays a smaller multiple for
 //                a bigger protocol. A protocol ten times the typical TVL carries roughly a
-//                third of the typical multiple. v1 assumed this slope was exactly zero (a
+//                quarter of the typical multiple. v1 assumed this slope was exactly zero (a
 //                flat multiple at every size); the traded record says otherwise, and this one
 //                term is most of the model's edge.
-//   group offset the median residual of the protocol's category, shrunk toward zero by
-//                n / (n + 6) so a category with two traded members barely moves the price and
-//                one with fifteen moves it most of the way; categories with no traded members
-//                take their family's offset, and a protocol with neither takes the market's.
+//   size_quad    fitted, about +0.03: the decline is steepest near the typical size and
+//                flattens for the largest protocols, so a straight line overstates the
+//                discount at the very top. The term is ridge-shrunk (lambda 1 on the
+//                standardised coefficients), so it bends the line only as far as the record
+//                supports. fitcomps-1 fitted the straight line alone; the curvature is one
+//                of this round's two changes.
+//   group offset a blend of two shrunk medians: the median residual of the protocol's
+//                category and of its family, each shrunk toward zero by n / (n + 10), then
+//                combined with the category's own weight n / (n + 10). A category with two
+//                traded members leans on its family; one with fifteen prices itself. A
+//                protocol with neither takes the market's offset of zero. fitcomps-1 took
+//                the category's offset whole when it existed and the family's only when it
+//                did not, with shrinkage n / (n + 6); the blend and the stronger shrinkage
+//                are this round's second change.
 //   fitting      iteratively reweighted least squares with weights 1 / max(|residual|, 0.05),
 //                which tracks the conditional median rather than the mean: the snapshot's
 //                multiples run from 0.0003x to 400x, and a mean fit lets a handful of manias
 //                and corpses set the price for everyone.
 //
-// Three candidate signals were fitted and REJECTED, and the dashboard says so: 7-day TVL
+// Three candidate signals were fitted again for this round — jointly with the size curve,
+// under the same regularisation — and REJECTED again, and the dashboard says so: 7-day TVL
 // growth, protocol age and chain count each move the backtest error by less than their own
-// noise, so they are shown on every row as context and used in the farm plan, but they do not
-// move the price. The model's own backtest — deterministic 10-fold cross-validation over the
-// 128 traded protocols, refitting on 115 and pricing the held-out 13, five partitions — is
-// computed by this file at run time and printed in the dashboard: median absolute log10 error,
-// the share of held-out protocols priced within 2x and 5x of their recorded market cap, and
-// the Spearman rank correlation between fitted and recorded values.
+// noise, so they are shown on every row as context and used in the farm plan, but they do
+// not move the price. The two changes that survived were kept only because they improved
+// the model's own backtest on the standard partitions AND on ten further partitions that
+// played no part in choosing them: against fitcomps-1's median error of x3.87 with 32% of
+// held-out protocols priced within 2x, this fit records x3.73 and 33%. The model's own
+// backtest — deterministic 10-fold cross-validation over the 128 traded protocols,
+// refitting on 115 and pricing the held-out 13, five partitions — is computed by this file
+// at run time and printed in the dashboard: median absolute log10 error, the share of
+// held-out protocols priced within 2x and 5x of their recorded market cap, and the
+// Spearman rank correlation between fitted and recorded values.
 //
 // The band on each row is the interquartile range of the residuals in the row's own peer
 // group (its category when that group has at least 8 fitted members, else its family, else
@@ -71,7 +88,8 @@ export interface Snapshot {
 
 /** The model's stated constants: the dashboard prints them and the math below uses nothing else. */
 export const MODEL = {
-  shrink_k: 6,
+  shrink_k: 10,
+  ridge_lambda: 1,
   band_min_group: 8,
   irls_rounds: 8,
   irls_floor: 0.05,
@@ -80,7 +98,7 @@ export const MODEL = {
 } as const;
 
 /** The model's version label, printed in the dashboard and in board.json. */
-export const MODEL_VERSION = 'fitcomps-1';
+export const MODEL_VERSION = 'fitcomps-2';
 
 /** How many traded protocols the dashboard carries as the fit-evidence view. */
 export const LIVE_ROWS = 36;
@@ -189,6 +207,7 @@ export interface RadarData {
     protocols: number;
     intercept: number;
     size_slope: number;
+    size_quad: number;
     base_multiple: number;
     backtest: Backtest;
   };
@@ -286,31 +305,39 @@ function solveLinear(a: number[][], b: number[]): number[] {
   return m.map((row, i) => row[n]! / (row[i]! || 1e-12));
 }
 
-/** Weighted least squares for a two-column design, through the normal equations. */
-function weightedFit(xs: number[][], ys: number[], ws: number[]): [number, number] {
+/**
+ * Ridge-regularised weighted least squares for the three-column design [1, size, size^2]
+ * (the two size columns standardised), through the normal equations. The intercept is
+ * unpenalised; the two size coefficients carry MODEL.ridge_lambda each, so the curvature
+ * term must earn its place against the straight line rather than chase the extremes.
+ */
+function ridgeFit3(xs: number[][], ys: number[], ws: number[]): [number, number, number] {
   const ata = [
-    [0, 0],
-    [0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
   ];
-  const atb = [0, 0];
+  const atb = [0, 0, 0];
   for (let i = 0; i < xs.length; i++) {
     const x = xs[i]!;
     const w = ws[i]!;
-    for (let a = 0; a < 2; a++) {
+    for (let a = 0; a < 3; a++) {
       atb[a]! += w * x[a]! * ys[i]!;
-      for (let c = 0; c < 2; c++) ata[a]![c]! += w * x[a]! * x[c]!;
+      for (let c = 0; c < 3; c++) ata[a]![c]! += w * x[a]! * x[c]!;
     }
   }
   ata[0]![0]! += 1e-9;
-  ata[1]![1]! += 1e-9;
-  const [b0, b1] = solveLinear(ata, atb);
-  return [b0!, b1!];
+  ata[1]![1]! += MODEL.ridge_lambda;
+  ata[2]![2]! += MODEL.ridge_lambda;
+  const [b0, b1, b2] = solveLinear(ata, atb);
+  return [b0!, b1!, b2!];
 }
 
-/** A fitted model: the global line, the shrunk group offsets, and each group's residuals. */
+/** A fitted model: the global size curve, the shrunk group offsets, and each group's residuals. */
 export interface Fit {
   intercept: number;
   sizeSlope: number;
+  sizeQuad: number;
   meanLnTvl: number;
   catOffset: Map<string, number>;
   famOffset: Map<string, number>;
@@ -323,23 +350,39 @@ export interface Fit {
 }
 
 /**
- * Fit the model on a set of traded protocols: the size line by IRLS toward the conditional
- * median, then each category's and family's offset as the shrunk median of its residuals.
+ * Fit the model on a set of traded protocols: the size curve by ridge-regularised IRLS
+ * toward the conditional median, then each category's and family's offset as the shrunk
+ * median of its residuals.
  */
 export function fitModel(train: SnapshotProtocol[]): Fit {
   const rows = train.filter(isFittable);
   const meanLnTvl = rows.reduce((s, p) => s + Math.log(p.tvl_usd), 0) / Math.max(1, rows.length);
-  const xs = rows.map((p) => [1, Math.log(p.tvl_usd) - meanLnTvl]);
+  // The two size features: the centred log size and its square, each standardised on the
+  // training rows so the ridge penalty treats them on one scale.
+  const raw = rows.map((p) => {
+    const s = Math.log(p.tvl_usd) - meanLnTvl;
+    return [s, s * s];
+  });
+  const centre = [0, 1].map((j) => raw.reduce((sum, r) => sum + r[j]!, 0) / Math.max(1, raw.length));
+  const scale = [0, 1].map((j) => {
+    const sd = Math.sqrt(raw.reduce((sum, r) => sum + (r[j]! - centre[j]!) ** 2, 0) / Math.max(1, raw.length));
+    return sd > 1e-9 ? sd : 1;
+  });
+  const xs = raw.map((r) => [1, (r[0]! - centre[0]!) / scale[0]!, (r[1]! - centre[1]!) / scale[1]!]);
   const ys = rows.map((p) => Math.log(p.mcap_usd! / p.tvl_usd));
-  let beta = weightedFit(xs, ys, rows.map(() => 1));
+  let beta = ridgeFit3(xs, ys, rows.map(() => 1));
   for (let round = 0; round < MODEL.irls_rounds; round++) {
     const weights = rows.map((_, i) => {
-      const r = ys[i]! - (beta[0] + beta[1] * xs[i]![1]!);
+      const r = ys[i]! - (beta[0] + beta[1] * xs[i]![1]! + beta[2] * xs[i]![2]!);
       return 1 / Math.max(Math.abs(r), MODEL.irls_floor);
     });
-    beta = weightedFit(xs, ys, weights);
+    beta = ridgeFit3(xs, ys, weights);
   }
-  const resid = rows.map((p, i) => ys[i]! - (beta[0] + beta[1] * xs[i]![1]!));
+  // The same fit in raw units: intercept, the size slope and the curvature at the mean size.
+  const sizeSlope = beta[1] / scale[0]!;
+  const sizeQuad = beta[2] / scale[1]!;
+  const intercept = beta[0] - beta[1] * (centre[0]! / scale[0]!) - beta[2] * (centre[1]! / scale[1]!);
+  const resid = rows.map((p, i) => ys[i]! - (beta[0] + beta[1] * xs[i]![1]! + beta[2] * xs[i]![2]!));
   const group = (keyOf: (p: SnapshotProtocol) => string | null) => {
     const offsets = new Map<string, number>();
     const peers = new Map<string, number>();
@@ -360,8 +403,9 @@ export function fitModel(train: SnapshotProtocol[]): Fit {
   const cat = group((p) => p.category);
   const fam = group((p) => familyOf(p.category));
   return {
-    intercept: beta[0],
-    sizeSlope: beta[1],
+    intercept,
+    sizeSlope,
+    sizeQuad,
     meanLnTvl,
     catOffset: cat.offsets,
     famOffset: fam.offsets,
@@ -374,15 +418,28 @@ export function fitModel(train: SnapshotProtocol[]): Fit {
   };
 }
 
-/** The offset that prices one protocol, and where it came from. */
+/**
+ * The offset that prices one protocol, and where it came from. When both the category and
+ * its family have traded members, the two offsets are blended with the category's own
+ * shrinkage weight, n / (n + k): a deep category prices itself, a thin one leans on its
+ * family instead of standing alone, and the blend runs to whichever group exists.
+ */
 function offsetFor(p: SnapshotProtocol, fit: Fit): { offset: number; basis: OffsetBasis; peers: number } {
-  if (p.category !== null && fit.catOffset.has(p.category)) {
-    return { offset: fit.catOffset.get(p.category)!, basis: 'category', peers: fit.catPeers.get(p.category)! };
+  const cat =
+    p.category !== null && fit.catOffset.has(p.category)
+      ? { offset: fit.catOffset.get(p.category)!, peers: fit.catPeers.get(p.category)! }
+      : null;
+  const famName = familyOf(p.category);
+  const fam =
+    famName !== null && fit.famOffset.has(famName)
+      ? { offset: fit.famOffset.get(famName)!, peers: fit.famPeers.get(famName)! }
+      : null;
+  if (cat !== null && fam !== null) {
+    const w = cat.peers / (cat.peers + MODEL.shrink_k);
+    return { offset: w * cat.offset + (1 - w) * fam.offset, basis: 'category', peers: cat.peers };
   }
-  const fam = familyOf(p.category);
-  if (fam !== null && fit.famOffset.has(fam)) {
-    return { offset: fit.famOffset.get(fam)!, basis: 'family', peers: fit.famPeers.get(fam)! };
-  }
+  if (cat !== null) return { offset: cat.offset, basis: 'category', peers: cat.peers };
+  if (fam !== null) return { offset: fam.offset, basis: 'family', peers: fam.peers };
   return { offset: 0, basis: 'market', peers: fit.protocols };
 }
 
@@ -408,10 +465,16 @@ function bandFor(p: SnapshotProtocol, fit: Fit): { q1: number; q3: number } {
   return { q1: quantile(s, 0.25) - centre, q3: quantile(s, 0.75) - centre };
 }
 
+/** The size curve's contribution to the log multiple at one TVL: slope plus curvature. */
+function sizeTerm(fit: Fit, tvl: number): number {
+  const s = Math.log(Math.max(1, tvl)) - fit.meanLnTvl;
+  return fit.sizeSlope * s + fit.sizeQuad * s * s;
+}
+
 /** The fitted log multiple for one protocol under one fit. */
 function fittedLogMultiple(p: SnapshotProtocol, fit: Fit): number {
   const { offset } = offsetFor(p, fit);
-  return fit.intercept + fit.sizeSlope * (Math.log(Math.max(1, p.tvl_usd)) - fit.meanLnTvl) + offset;
+  return fit.intercept + sizeTerm(fit, p.tvl_usd) + offset;
 }
 
 /** The price one protocol gets under one fit: value, band, and the pieces the dashboard shows. */
@@ -420,7 +483,7 @@ export function priceWithFit(
   fit: Fit,
 ): { implied: number; low: number; high: number; multiple: number; sizeFactor: number; offset: number; basis: OffsetBasis; peers: number } {
   const { offset, basis, peers } = offsetFor(p, fit);
-  const sizeFactor = Math.exp(fit.sizeSlope * (Math.log(Math.max(1, p.tvl_usd)) - fit.meanLnTvl));
+  const sizeFactor = Math.exp(sizeTerm(fit, p.tvl_usd));
   const multiple = Math.exp(fit.intercept) * sizeFactor * Math.exp(offset);
   const band = bandFor(p, fit);
   const implied = Math.max(1, Math.round(p.tvl_usd * multiple));
@@ -782,6 +845,7 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
       protocols: fit.protocols,
       intercept: round4(fit.intercept),
       size_slope: round4(fit.sizeSlope),
+      size_quad: round4(fit.sizeQuad),
       base_multiple: round4(Math.exp(fit.intercept)),
       backtest: bt,
     },

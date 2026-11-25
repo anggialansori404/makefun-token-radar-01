@@ -1,4 +1,4 @@
-// Token Radar v2 (token-radar-01 entry, Node 22, standard library only).
+// Token Radar v3 (token-radar-01 entry, Node 22, standard library only).
 //
 // Reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), fits the
 // pricing model in lib/model.ts on the snapshot's own traded population, prices every
@@ -89,6 +89,6 @@ writeFileSync(
 
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live shown as evidence)\n` +
-    `token radar: model ${radar.model_version} fitted on ${radar.fit.protocols} traded protocols (size slope ${radar.fit.size_slope}); backtest median error x${radar.fit.backtest.typical_factor}, within 2x ${(radar.fit.backtest.within_2x * 100).toFixed(0)}%\n` +
+    `token radar: model ${radar.model_version} fitted on ${radar.fit.protocols} traded protocols (size slope ${radar.fit.size_slope}, curvature ${radar.fit.size_quad}); backtest median error x${radar.fit.backtest.typical_factor}, within 2x ${(radar.fit.backtest.within_2x * 100).toFixed(0)}%\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')}, ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );
